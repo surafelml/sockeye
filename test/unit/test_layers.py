@@ -18,6 +18,13 @@ import sockeye.layers
 import sockeye.transformer
 
 
+@pytest.mark.parametrize('scale', [0.1, 1.0])
+def test_init_switch_uniform_(scale):
+    layer = pt.nn.Linear(in_features=8, out_features=16)
+    result = sockeye.layers.init_switch_uniform_(layer.weight, scale=scale)
+    assert result is layer.weight
+
+
 def test_lhuc():
     num_hidden = 50
     batch_size = 10

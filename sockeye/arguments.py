@@ -916,6 +916,12 @@ def add_training_args(params):
                               type=float,
                               default=0.0002,
                               help='Initial learning rate. Default: %(default)s.')
+    train_params.add_argument('--weight-init',
+                              choices=C.WEIGHT_INIT_CHOICES,
+                              default=C.WEIGHT_INIT_XAVIER,
+                              help='Weight initialization strategy. Switch corresponds to the initialization used for '
+                                   'the Switch Transformer (Fedus et al. 2021, https://arxiv.org/abs/2101.03961). '
+                                   'Default: %(default)s.')
     train_params.add_argument('--weight-decay',
                               type=float,
                               default=0.0,

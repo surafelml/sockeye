@@ -531,7 +531,7 @@ class _DecodeStep(pt.nn.Module):
         return outputs
 
 
-def initialize_parameters(module: pt.nn.Module):
+def initialize_parameters(module: pt.nn.Module, strategy: str = C.WEIGHT_INIT_XAVIER):
     """
     Can be applied to a SockeyeModel (via `model.apply(initialize_parameters)`)
     to initialize the parameters of a PyTorch SockeyeModel.
@@ -554,11 +554,27 @@ def initialize_parameters(module: pt.nn.Module):
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
-        pt.nn.init.xavier_uniform_(module.weight, gain=1)
+        if strategy == C.WEIGHT_INIT_XAVIER:
+            pt.nn.init.xavier_uniform_(module.weight, gain=1)
+        elif strategy == C.WEIGHT_INIT_KAIMING:
+            pt.nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
+        elif strategy == C.WEIGHT_INIT_ORTHOGONAL:
+            pt.nn.init.orthogonal_(module.weight)
+        elif strategy == C.WEIGHT_INIT_SWITCH:
+            layers.init_switch_(module.weight)
+        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
+            layers.init_switch_(module.weight, use_uniform=True)
+        elif strategy == C.WEIGHT_INIT_PALM:
+            layers.init_palm_(module.weight)
+        else:
+            raise ValueError(f'Unknown weight initialization strategy: {strategy}')
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, pt.nn.Embedding):
-        pt.nn.init.uniform_(module.weight, -0.07, 0.07)
+        if strategy == C.WEIGHT_INIT_PALM:
+            pt.nn.init.normal_(module.weight)
+        else:
+            pt.nn.init.uniform_(module.weight, -0.07, 0.07)
     elif isinstance(module, pt.nn.LayerNorm):
         if module.elementwise_affine:
             pt.nn.init.ones_(module.weight)

@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -31,6 +32,48 @@ def get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module:
     if act_type == C.GELU:
         return pt.nn.GELU()
     return pt.nn.ReLU(inplace=inplace)
+
+
+def init_switch_(tensor: pt.Tensor, scale: float = 0.1, use_uniform: bool = False) -> pt.Tensor:
+    """
+    Initialization used by Fedus et al. in "Switch Transformers: Scaling to
+    Trillion Parameter Models with Simple and Efficient Sparsity" (2021,
+    https://arxiv.org/abs/2101.03961).
+
+    Draw elements from a truncated normal (or uniform) distribution using std =
+    sqrt(scale / fan_in). The authors recommend scale = 0.1. As the Switch
+    Transformer is originally implemented in Mesh TensorFlow, we use the
+    TensorFlow method of truncating based on 2 standard deviations:
+    https://www.tensorflow.org/api_docs/python/tf/keras/initializers/TruncatedNormal
+
+    :param tensor: Tensor (weights) to initialize in-place.
+    :param scale: Scale hyper-parameter.
+    :param use_uniform: Use uniform distribution instead of normal distribution,
+                        applying the same bounds.
+
+    :return: The input tensor with weights already initialized in-place.
+    """
+    fan_in, _ = pt.nn.init._calculate_fan_in_and_fan_out(tensor)
+    std = math.sqrt(scale / fan_in)
+    if use_uniform:
+        return pt.nn.init.uniform_(tensor, a=-2 * std, b=2 * std)
+    else:
+        return pt.nn.init.trunc_normal_(tensor, mean=0, std=std, a=-2 * std, b=2 * std)
+
+
+def init_palm_(tensor: pt.Tensor) -> pt.Tensor:
+    """
+    Initialization used by Chowdhery et al. in "PaLM: Scaling Language Modeling
+    with Pathways" (2022,
+    https://ai.googleblog.com/2022/04/pathways-language-model-palm-scaling-to.html)
+
+    :param tensor: Tensor (weights) to initialize in-place.
+
+    :return: The input tensor with weights already initialized in-place.
+    """
+    fan_in, _ = pt.nn.init._calculate_fan_in_and_fan_out(tensor)
+    std = 1 / math.sqrt(fan_in)
+    return pt.nn.init.normal_(tensor, mean=0, std=std)
 
 
 class LHUC(pt.nn.Module):

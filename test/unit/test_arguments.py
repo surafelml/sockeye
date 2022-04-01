@@ -198,6 +198,7 @@ def test_inference_args(test_params, expected_params):
               min_num_epochs=None,
               max_num_epochs=None,
               initial_learning_rate=0.0002,
+              weight_init=C.WEIGHT_INIT_XAVIER,
               weight_decay=0.0,
               momentum=0.0,
               gradient_clipping_threshold=1.0,
