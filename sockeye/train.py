@@ -979,7 +979,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         model_config,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     sockeye_model.to(device)
-    sockeye_model.apply(functools.partial(model.initialize_parameters, strategy=args.weight_init))
+    sockeye_model.apply(functools.partial(model.initialize_parameters,
+                                          model_config=model_config,
+                                          strategy=args.weight_init))
 
     # Load starting parameters if specified
     if args.params is not None:
