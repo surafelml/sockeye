@@ -542,10 +542,8 @@ class _DecodeStep(pt.nn.Module):
         return outputs
 
 
-def initialize_parameters(module: pt.nn.Module, model_config: ModelConfig, strategy: str = C.WEIGHT_INIT_XAVIER):
+def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_INIT_XAVIER):
     """
-    Can be applied to a SockeyeModel (via `model.apply(initialize_parameters)`)
-    to initialize the parameters of a PyTorch SockeyeModel.
     For reproducibility, set pt.random.manual_seed.
 
     This implementation follows the default MXNet initialization scheme:
@@ -564,75 +562,104 @@ def initialize_parameters(module: pt.nn.Module, model_config: ModelConfig, strat
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
-    if isinstance(module, SockeyeModel):
-        # Second pass
-        if strategy == C.WEIGHT_INIT_T_FIXUP:
-            # Huang et al., "Improving Transformer Optimization Through Better
-            # Initialization" (2020)
-            with pt.no_grad():
-                for layer in module.encoder.modules():
-                    if isinstance(layer, pt.nn.Linear):
-                        layer.weight *= (0.67 * model_config.config_encoder.num_layers)**-.25
-                for layer in module.decoder.modules():
-                    if isinstance(layer, pt.nn.Linear):
-                        layer.weight *= (9 * model_config.config_decoder.num_layers)**-.25
-                for layer in module.embedding_source.modules():
-                    if isinstance(layer, pt.nn.Embedding):
-                        layer.weight *= (model_config.config_encoder.model_size**-.5
-                                         * (9 * model_config.config_encoder.num_layers)**-.25)
-                for layer in module.embedding_target.modules():
-                    if isinstance(layer, pt.nn.Embedding):
-                        layer.weight *= (model_config.config_decoder.model_size**-.5
-                                         * (9 * model_config.config_decoder.num_layers)**-.25)
-                assert isinstance(module.output_layer, layers.OutputLayer)
-                module.output_layer.weight *= (9 * model_config.config_decoder.num_layers)**-.25  # type: ignore
-                for layer in module.factor_output_layers:
-                    assert isinstance(layer, pt.nn.Linear)
-                    layer.weight *= (9 * model_config.config_decoder.num_layers)**-.25
-        elif strategy == C.WEIGHT_INIT_DEPTH_SCALE:
-            # Zhang et al., "Improving Deep Transformer with Depth-Scaled
-            # Initialization and Merged Attention" (2019)
-            with pt.no_grad():
-                for l, layer in enumerate(module.encoder.layers, 1):
-                    for _layer in layer.modules():
-                        if isinstance(_layer, pt.nn.Linear):
-                            _layer.weight *= 1 / math.sqrt(l)
-                assert isinstance(module.decoder, decoder.TransformerDecoder)
-                for l, layer in enumerate(module.decoder.layers, 1):
-                    for _layer in layer.modules():
-                        if isinstance(_layer, pt.nn.Linear):
-                            _layer.weight *= 1 / math.sqrt(l)
-    elif isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
+    if isinstance(layer, pt.nn.Linear) or isinstance(layer, layers.OutputLayer):
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP, C.WEIGHT_INIT_DEPTH_SCALE]:
-            pt.nn.init.xavier_uniform_(module.weight, gain=1)
+            pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_KAIMING:
-            pt.nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
+            pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
         elif strategy == C.WEIGHT_INIT_ORTHOGONAL:
-            pt.nn.init.orthogonal_(module.weight)
+            pt.nn.init.orthogonal_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH:
-            layers.init_switch_(module.weight)
+            layers.init_switch_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_(module.weight, use_uniform=True)
+            layers.init_switch_(layer.weight, use_uniform=True)
         elif strategy == C.WEIGHT_INIT_PALM:
-            layers.init_palm_(module.weight)
+            layers.init_palm_(layer.weight)
         else:
             raise ValueError(f'Unknown weight initialization strategy: {strategy}')
-        if module.bias is not None:
-            pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, pt.nn.Embedding):
+        if layer.bias is not None:
+            pt.nn.init.zeros_(layer.bias)
+    elif isinstance(layer, pt.nn.Embedding):
         if strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
-            pt.nn.init.normal_(module.weight)
+            pt.nn.init.normal_(layer.weight)
         else:
-            pt.nn.init.uniform_(module.weight, -0.07, 0.07)
-    elif isinstance(module, pt.nn.LayerNorm):
-        if module.elementwise_affine:
-            pt.nn.init.ones_(module.weight)
-            pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, layers.LHUC):
-        pt.nn.init.uniform_(module.weight, a=0.1)
-    elif isinstance(module, layers.PositionalEmbeddings):
-        if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            pt.nn.init.xavier_uniform(module.weight, gain=1.0)
+            pt.nn.init.uniform_(layer.weight, -0.07, 0.07)
+    elif isinstance(layer, pt.nn.LayerNorm):
+        if layer.elementwise_affine:
+            pt.nn.init.ones_(layer.weight)
+            pt.nn.init.zeros_(layer.bias)
+    elif isinstance(layer, layers.LHUC):
+        pt.nn.init.uniform_(layer.weight, a=0.1)
+    elif isinstance(layer, layers.PositionalEmbeddings):
+        if layer.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            pt.nn.init.xavier_uniform(layer.weight, gain=1.0)
+
+
+def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAVIER):
+    """
+    Initialize a SockeyeModel's parameters using a specified strategy.
+
+    :param model: The SockeyeModel to initialize
+    :param strategy: The named initialization strategy
+    """
+    # Layers that can share parameters are initialized in ascending order of
+    # preference: source embeddings (src) are overwritten by target embeddings
+    # (trg) which are overwritten by the output layer (softmax).
+    init_last_in_order = [model.embedding_source.embedding, model.embedding_target.embedding, model.output_layer]
+    excluded = set(init_last_in_order)
+
+    # First pass: layers that never use tied weights
+    for layer in model.modules():
+        if layer not in excluded:
+            _initialize_layer_parameters(layer, strategy=strategy)
+
+    # Second pass: layers that can use tied weights
+    for layer in init_last_in_order:
+        _initialize_layer_parameters(layer, strategy=strategy)
+
+    # Third pass: custom initialization based on model-level information
+    if strategy == C.WEIGHT_INIT_T_FIXUP:
+        # Huang et al., "Improving Transformer Optimization Through Better
+        # Initialization" (2020)
+        with pt.no_grad():
+            for layer in model.encoder.modules():
+                if isinstance(layer, pt.nn.Linear):
+                    layer.weight *= (0.67 * model.config.config_encoder.num_layers)**-.25
+            for layer in model.decoder.modules():
+                if isinstance(layer, pt.nn.Linear):
+                    layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
+            for layer in model.embedding_source.modules():
+                if isinstance(layer, pt.nn.Embedding):
+                    # Overwrite
+                    pt.nn.init.normal_(layer.weight)
+                    layer.weight *= (model.config.config_encoder.model_size**-.5
+                                     * (9 * model.config.config_encoder.num_layers)**-.25)
+            for layer in model.embedding_target.modules():
+                if isinstance(layer, pt.nn.Embedding):
+                    # Overwrite
+                    pt.nn.init.normal_(layer.weight)
+                    layer.weight *= (model.config.config_decoder.model_size**-.5
+                                     * (9 * model.config.config_decoder.num_layers)**-.25)
+            assert isinstance(model.output_layer, layers.OutputLayer)
+            # Overwrite
+            pt.nn.init.xavier_uniform_(model.output_layer.weight, gain=1)
+            model.output_layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25  # type: ignore
+            for layer in model.factor_output_layers:
+                assert isinstance(layer, pt.nn.Linear)
+                layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
+    elif strategy == C.WEIGHT_INIT_DEPTH_SCALE:
+        # Zhang et al., "Improving Deep Transformer with Depth-Scaled
+        # Initialization and Merged Attention" (2019)
+        with pt.no_grad():
+            for l, layer in enumerate(model.encoder.layers, 1):
+                for _layer in layer.modules():
+                    if isinstance(_layer, pt.nn.Linear):
+                        _layer.weight *= 1 / math.sqrt(l)
+            assert isinstance(model.decoder, decoder.TransformerDecoder)
+            for l, layer in enumerate(model.decoder.layers, 1):
+                for _layer in layer.modules():
+                    if isinstance(_layer, pt.nn.Linear):
+                        _layer.weight *= 1 / math.sqrt(l)
 
 
 def load_model(model_folder: str,

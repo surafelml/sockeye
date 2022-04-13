@@ -978,12 +978,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         model_config,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     sockeye_model.to(device)
-    # Initialize all modules contained in the SockeyeModel, then initialize the
-    # SockeyeModel itself. This suppports two-stage initialization strategies.
-    for module in sockeye_model.modules():
-        if not isinstance(module, model.SockeyeModel):
-            model.initialize_parameters(module, model_config=model_config, strategy=args.weight_init)
-    model.initialize_parameters(sockeye_model, model_config=model_config, strategy=args.weight_init)
+
+    # Initialize model parameters
+    model.initialize_parameters(sockeye_model, strategy=args.weight_init)
 
     # Load starting parameters if specified
     if args.params is not None:
