@@ -70,7 +70,7 @@ def mock_model():
 
 def test_set_parameters():
     model = mock_model()
-    sockeye.model.initialize_parameters(model, None)
+    sockeye.model.initialize_parameters(model)
     model_params = dict(model.named_parameters())
 
     param = pt.nn.Parameter(pt.ones(20, 4))
@@ -82,7 +82,7 @@ def test_set_parameters():
 
 def test_set_parameters_allow_missing():
     model = mock_model()
-    sockeye.model.initialize_parameters(model, None)
+    sockeye.model.initialize_parameters(model)
     model_params = dict(model.named_parameters())
     model.set_parameters({}, allow_missing=True)
     assert 'embedding_source.embedding.weight' in model_params
@@ -94,7 +94,7 @@ def test_set_parameters_allow_missing():
 
 def test_set_parameters_ignore_extra():
     model = mock_model()
-    sockeye.model.initialize_parameters(model, None)
+    sockeye.model.initialize_parameters(model)
     model_params = dict(model.named_parameters())
 
     p = pt.nn.Parameter(pt.ones(20, 4))
