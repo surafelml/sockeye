@@ -563,7 +563,10 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
     if isinstance(layer, pt.nn.Linear) or isinstance(layer, layers.OutputLayer):
-        if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP, C.WEIGHT_INIT_DEPTH_SCALE]:
+        if strategy in [C.WEIGHT_INIT_XAVIER,
+                        C.WEIGHT_INIT_XAVIER_ALL,
+                        C.WEIGHT_INIT_T_FIXUP,
+                        C.WEIGHT_INIT_DEPTH_SCALE]:
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_KAIMING:
             pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
@@ -580,7 +583,13 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
         if layer.bias is not None:
             pt.nn.init.zeros_(layer.bias)
     elif isinstance(layer, pt.nn.Embedding):
-        if strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
+        if strategy == C.WEIGHT_INIT_XAVIER_ALL:
+            pt.nn.init.xavier_uniform_(layer.weight, gain=1)
+        elif strategy == C.WEIGHT_INIT_SWITCH:
+            layers.init_switch_(layer.weight)
+        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
+            layers.init_switch_(layer.weight, use_uniform=True)
+        elif strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.normal_(layer.weight)
         else:
             pt.nn.init.uniform_(layer.weight, -0.07, 0.07)
