@@ -422,8 +422,8 @@ def create_encoder_config(args: argparse.Namespace,
     """
     encoder_num_layers, _ = args.num_layers
 
-    encoder_transformer_preprocess, _ = args.transformer_preprocess
-    encoder_transformer_postprocess, _ = args.transformer_postprocess
+    encoder_transformer_preprocess, _ = (arg.strip() for arg in args.transformer_preprocess)
+    encoder_transformer_postprocess, _ = (arg.strip() for arg in args.transformer_postprocess)
     encoder_transformer_model_size, _ = args.transformer_model_size
 
     total_source_factor_size = 0
@@ -475,8 +475,8 @@ def create_decoder_config(args: argparse.Namespace,
     """
     _, decoder_num_layers = args.num_layers
 
-    _, decoder_transformer_preprocess = args.transformer_preprocess
-    _, decoder_transformer_postprocess = args.transformer_postprocess
+    _, decoder_transformer_preprocess = (arg.strip() for arg in args.transformer_preprocess)
+    _, decoder_transformer_postprocess = (arg.strip() for arg in args.transformer_postprocess)
     _, decoder_transformer_model_size = args.transformer_model_size
 
     total_target_factor_size = 0
