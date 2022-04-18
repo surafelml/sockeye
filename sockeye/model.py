@@ -563,10 +563,7 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
     if isinstance(layer, pt.nn.Linear) or isinstance(layer, layers.OutputLayer):
-        if strategy in [C.WEIGHT_INIT_XAVIER,
-                        C.WEIGHT_INIT_XAVIER_ALL,
-                        C.WEIGHT_INIT_T_FIXUP,
-                        C.WEIGHT_INIT_DEPTH_SCALE]:
+        if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_KAIMING:
             pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
@@ -581,9 +578,7 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
         if layer.bias is not None:
             pt.nn.init.zeros_(layer.bias)
     elif isinstance(layer, pt.nn.Embedding):
-        if strategy == C.WEIGHT_INIT_XAVIER_ALL:
-            pt.nn.init.xavier_uniform_(layer.weight, gain=1)
-        elif strategy == C.WEIGHT_INIT_SWITCH:
+        if strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
         elif strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.normal_(layer.weight)
@@ -635,36 +630,23 @@ def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAV
                     layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
             for layer in model.embedding_source.modules():
                 if isinstance(layer, pt.nn.Embedding):
-                    # Overwrite
+                    # Overwrite potentially tied weights
                     pt.nn.init.normal_(layer.weight)
                     layer.weight *= (model.config.config_encoder.model_size**-.5
                                      * (9 * model.config.config_encoder.num_layers)**-.25)
             for layer in model.embedding_target.modules():
                 if isinstance(layer, pt.nn.Embedding):
-                    # Overwrite
+                    # Overwrite potentially tied weights
                     pt.nn.init.normal_(layer.weight)
                     layer.weight *= (model.config.config_decoder.model_size**-.5
                                      * (9 * model.config.config_decoder.num_layers)**-.25)
             assert isinstance(model.output_layer, layers.OutputLayer)
-            # Overwrite
+            # Overwrite potentially tied weights
             pt.nn.init.xavier_uniform_(model.output_layer.weight, gain=1)
             model.output_layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25  # type: ignore
             for layer in model.factor_output_layers:
                 assert isinstance(layer, pt.nn.Linear)
                 layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
-    elif strategy == C.WEIGHT_INIT_DEPTH_SCALE:
-        # Zhang et al., "Improving Deep Transformer with Depth-Scaled
-        # Initialization and Merged Attention" (2019)
-        with pt.no_grad():
-            for l, layer in enumerate(model.encoder.layers, 1):
-                for _layer in layer.modules():
-                    if isinstance(_layer, pt.nn.Linear):
-                        _layer.weight *= 1 / math.sqrt(l)
-            assert isinstance(model.decoder, decoder.TransformerDecoder)
-            for l, layer in enumerate(model.decoder.layers, 1):
-                for _layer in layer.modules():
-                    if isinstance(_layer, pt.nn.Linear):
-                        _layer.weight *= 1 / math.sqrt(l)
 
 
 def load_model(model_folder: str,
