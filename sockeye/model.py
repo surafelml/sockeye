@@ -574,8 +574,6 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
             pt.nn.init.orthogonal_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_(layer.weight, use_uniform=True)
         elif strategy == C.WEIGHT_INIT_PALM:
             layers.init_palm_(layer.weight)
         else:
@@ -587,8 +585,6 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_(layer.weight, use_uniform=True)
         elif strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.normal_(layer.weight)
         else:
