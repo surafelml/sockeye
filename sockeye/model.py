@@ -619,8 +619,8 @@ def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAV
 
     # Third pass: custom initialization based on model-level information
     if strategy == C.WEIGHT_INIT_T_FIXUP:
-        # Huang et al., "Improving Transformer Optimization Through Better
-        # Initialization" (2020)
+        # "Improving Transformer Optimization Through Better Initialization"
+        # (Huang et al. 2020, https://proceedings.mlr.press/v119/huang20f.html)
         with pt.no_grad():
             for layer in model.encoder.modules():
                 if isinstance(layer, pt.nn.Linear):
