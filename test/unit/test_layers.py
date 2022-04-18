@@ -18,10 +18,11 @@ import sockeye.layers
 import sockeye.transformer
 
 
-@pytest.mark.parametrize('scale', [0.1, 1.0])
-def test_init_switch_(scale):
+@pytest.mark.parametrize('scale,use_uniform', [(0.1, False), (0.1, True),
+                                               (1.0, False), (1.0, True)])
+def test_init_switch_(scale, use_uniform):
     layer = pt.nn.Linear(in_features=8, out_features=16)
-    result = sockeye.layers.init_switch_(layer.weight, scale=scale)
+    result = sockeye.layers.init_switch_(layer.weight, scale=scale, use_uniform=use_uniform)
     assert result is layer.weight
 
 
