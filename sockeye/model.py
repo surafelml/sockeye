@@ -566,15 +566,14 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_KAIMING:
-            pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
+            # Use 'linear' to match "Self-Normalizing Neural Networks"
+            # (Klambauer et al. 2017,
+            # https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html)
+            pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='linear')
         elif strategy == C.WEIGHT_INIT_ORTHOGONAL:
             pt.nn.init.orthogonal_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_(layer.weight, use_uniform=True)
-        elif strategy == C.WEIGHT_INIT_PALM:
-            layers.init_palm_(layer.weight)
         else:
             raise ValueError(f'Unknown weight initialization strategy: {strategy}')
         if layer.bias is not None:
@@ -582,9 +581,7 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     elif isinstance(layer, pt.nn.Embedding):
         if strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_(layer.weight, use_uniform=True)
-        elif strategy in [C.WEIGHT_INIT_PALM, C.WEIGHT_INIT_T_FIXUP]:
+        elif strategy == C.WEIGHT_INIT_T_FIXUP:
             pt.nn.init.normal_(layer.weight)
         else:
             pt.nn.init.uniform_(layer.weight, -0.07, 0.07)
