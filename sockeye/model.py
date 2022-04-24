@@ -566,9 +566,7 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_KAIMING:
-            # Use 'linear' to match "Self-Normalizing Neural Networks"
-            # (Klambauer et al. 2017,
-            # https://papers.nips.cc/paper/2017/hash/5d44ee6f2c3f71b73125876103c8f6c4-Abstract.html)
+            # Use 'linear' for all layers by default
             pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='linear')
         elif strategy == C.WEIGHT_INIT_ORTHOGONAL:
             pt.nn.init.orthogonal_(layer.weight)
@@ -648,6 +646,17 @@ def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAV
             for layer in model.factor_output_layers:
                 assert isinstance(layer, pt.nn.Linear)
                 layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
+    elif strategy == C.WEIGHT_INIT_KAIMING:
+        # Reinitialize layers followed by ReLU activation with 'relu'
+        for layer in model.encoder.layers:
+            assert isinstance(layer, transformer.TransformerEncoderBlock)
+            pt.nn.init.kaiming_normal_(layer.ff.ff1.weight, nonlinearity='relu')
+        assert isinstance(model.decoder, decoder.TransformerDecoder)
+        for layer in model.decoder.layers:
+            assert isinstance(layer, transformer.TransformerDecoderBlock)
+            pt.nn.init.kaiming_normal_(layer.ff.ff1.weight, nonlinearity='relu')
+            if isinstance(layer.autoregr_layer, layers.SSRU):
+                pt.nn.init.kaiming_normal_(layer.autoregr_layer.linear.weight, nonlinearity='relu')
 
 
 def load_model(model_folder: str,
