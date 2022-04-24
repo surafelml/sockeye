@@ -572,6 +572,8 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
             pt.nn.init.orthogonal_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
+        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
+            layers.init_switch_uniform_(layer.weight)
         else:
             raise ValueError(f'Unknown weight initialization strategy: {strategy}')
         if layer.bias is not None:
@@ -579,6 +581,8 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     elif isinstance(layer, pt.nn.Embedding):
         if strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
+        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
+            layers.init_switch_uniform_(layer.weight)
         elif strategy == C.WEIGHT_INIT_T_FIXUP:
             pt.nn.init.normal_(layer.weight)
         else:
