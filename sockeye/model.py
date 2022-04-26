@@ -565,15 +565,8 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     if isinstance(layer, pt.nn.Linear) or isinstance(layer, layers.OutputLayer):
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.xavier_uniform_(layer.weight, gain=1)
-        elif strategy == C.WEIGHT_INIT_KAIMING:
-            # Use 'linear' for all layers by default
-            pt.nn.init.kaiming_normal_(layer.weight, nonlinearity='linear')
-        elif strategy == C.WEIGHT_INIT_ORTHOGONAL:
-            pt.nn.init.orthogonal_(layer.weight)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_uniform_(layer.weight)
         else:
             raise ValueError(f'Unknown weight initialization strategy: {strategy}')
         if layer.bias is not None:
@@ -581,8 +574,6 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     elif isinstance(layer, pt.nn.Embedding):
         if strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(layer.weight)
-        elif strategy == C.WEIGHT_INIT_SWITCH_UNIFORM:
-            layers.init_switch_uniform_(layer.weight)
         elif strategy == C.WEIGHT_INIT_T_FIXUP:
             pt.nn.init.normal_(layer.weight)
         else:
@@ -650,17 +641,6 @@ def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAV
             for layer in model.factor_output_layers:
                 assert isinstance(layer, pt.nn.Linear)
                 layer.weight *= (9 * model.config.config_decoder.num_layers)**-.25
-    elif strategy == C.WEIGHT_INIT_KAIMING:
-        # Reinitialize layers followed by ReLU activation with 'relu'
-        for layer in model.encoder.layers:
-            assert isinstance(layer, transformer.TransformerEncoderBlock)
-            pt.nn.init.kaiming_normal_(layer.ff.ff1.weight, nonlinearity='relu')
-        assert isinstance(model.decoder, decoder.TransformerDecoder)
-        for layer in model.decoder.layers:
-            assert isinstance(layer, transformer.TransformerDecoderBlock)
-            pt.nn.init.kaiming_normal_(layer.ff.ff1.weight, nonlinearity='relu')
-            if isinstance(layer.autoregr_layer, layers.SSRU):
-                pt.nn.init.kaiming_normal_(layer.autoregr_layer.linear.weight, nonlinearity='relu')
 
 
 def load_model(model_folder: str,
