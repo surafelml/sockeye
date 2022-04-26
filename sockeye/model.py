@@ -542,7 +542,7 @@ class _DecodeStep(pt.nn.Module):
         return outputs
 
 
-def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_INIT_XAVIER):
+def _initialize_layer_parameters(module: pt.nn.Module, strategy: str = C.WEIGHT_INIT_XAVIER):
     """
     For reproducibility, set pt.random.manual_seed.
 
@@ -562,31 +562,31 @@ def _initialize_layer_parameters(layer: pt.nn.Module, strategy: str = C.WEIGHT_I
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
-    if isinstance(layer, pt.nn.Linear) or isinstance(layer, layers.OutputLayer):
+    if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
-            pt.nn.init.xavier_uniform_(layer.weight, gain=1)
+            pt.nn.init.xavier_uniform_(module.weight, gain=1)
         elif strategy == C.WEIGHT_INIT_SWITCH:
-            layers.init_switch_(layer.weight)
+            layers.init_switch_(module.weight)
         else:
             raise ValueError(f'Unknown weight initialization strategy: {strategy}')
-        if layer.bias is not None:
-            pt.nn.init.zeros_(layer.bias)
-    elif isinstance(layer, pt.nn.Embedding):
+        if module.bias is not None:
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, pt.nn.Embedding):
         if strategy == C.WEIGHT_INIT_SWITCH:
-            layers.init_switch_(layer.weight)
+            layers.init_switch_(module.weight)
         elif strategy == C.WEIGHT_INIT_T_FIXUP:
-            pt.nn.init.normal_(layer.weight)
+            pt.nn.init.normal_(module.weight)
         else:
-            pt.nn.init.uniform_(layer.weight, -0.07, 0.07)
-    elif isinstance(layer, pt.nn.LayerNorm):
-        if layer.elementwise_affine:
-            pt.nn.init.ones_(layer.weight)
-            pt.nn.init.zeros_(layer.bias)
-    elif isinstance(layer, layers.LHUC):
-        pt.nn.init.uniform_(layer.weight, a=0.1)
-    elif isinstance(layer, layers.PositionalEmbeddings):
-        if layer.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            pt.nn.init.xavier_uniform(layer.weight, gain=1.0)
+            pt.nn.init.uniform_(module.weight, -0.07, 0.07)
+    elif isinstance(module, pt.nn.LayerNorm):
+        if module.elementwise_affine:
+            pt.nn.init.ones_(module.weight)
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, layers.LHUC):
+        pt.nn.init.uniform_(module.weight, a=0.1)
+    elif isinstance(module, layers.PositionalEmbeddings):
+        if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            pt.nn.init.xavier_uniform(module.weight, gain=1.0)
 
 
 def initialize_parameters(model: SockeyeModel, strategy: str = C.WEIGHT_INIT_XAVIER):
