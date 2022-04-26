@@ -920,8 +920,7 @@ def add_training_args(params):
                               choices=C.WEIGHT_INIT_CHOICES,
                               default=C.WEIGHT_INIT_XAVIER,
                               help='Weight initialization strategy. Switch: Fedus et al. (2021, '
-                                   'https://arxiv.org/abs/2101.03961). Palm: Chowdhery et al. (2022, '
-                                   'https://arxiv.org/abs/2204.02311). T_fixup: Huang et al. (2020, '
+                                   'https://arxiv.org/abs/2101.03961). T_fixup: Huang et al. (2020, '
                                    'https://proceedings.mlr.press/v119/huang20f.html). Default: %(default)s.')
     train_params.add_argument('--weight-decay',
                               type=float,

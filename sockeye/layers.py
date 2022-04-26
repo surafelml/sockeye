@@ -56,13 +56,6 @@ def init_switch_(tensor: pt.Tensor, scale: float = 0.1) -> pt.Tensor:
     return pt.nn.init.trunc_normal_(tensor, mean=0, std=std, a=-2 * std, b=2 * std)
 
 
-def init_switch_uniform_(tensor: pt.Tensor, scale: float = 0.1) -> pt.Tensor:
-    fan_in, _ = pt.nn.init._calculate_fan_in_and_fan_out(tensor)
-    std = math.sqrt(scale / fan_in)
-    a = math.sqrt(3.0) * std
-    return pt.nn.init.uniform_(tensor, -a, a)
-
-
 class LHUC(pt.nn.Module):
     """
     Learning Hidden Unit Contribution
