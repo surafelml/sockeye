@@ -565,6 +565,8 @@ def _initialize_layer_parameters(module: pt.nn.Module, strategy: str = C.WEIGHT_
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
         if strategy in [C.WEIGHT_INIT_XAVIER, C.WEIGHT_INIT_T_FIXUP]:
             pt.nn.init.xavier_uniform_(module.weight, gain=1)
+        elif strategy == C.WEIGHT_INIT_BERT:
+            pt.nn.init.trunc_normal_(module.weight, mean=0, std=0.02, a=-0.04, b=0.04)
         elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(module.weight)
         else:
@@ -572,7 +574,9 @@ def _initialize_layer_parameters(module: pt.nn.Module, strategy: str = C.WEIGHT_
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, pt.nn.Embedding):
-        if strategy == C.WEIGHT_INIT_SWITCH:
+        if strategy == C.WEIGHT_INIT_BERT:
+            pt.nn.init.trunc_normal_(module.weight, mean=0, std=0.02, a=-0.04, b=0.04)
+        elif strategy == C.WEIGHT_INIT_SWITCH:
             layers.init_switch_(module.weight)
         elif strategy == C.WEIGHT_INIT_T_FIXUP:
             pt.nn.init.normal_(module.weight)
