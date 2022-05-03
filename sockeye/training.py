@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, 
 import numpy as np
 import torch
 import torch.distributed
+import torch.distributed.optim
 
 try:
     import apex.amp
@@ -293,6 +294,9 @@ class EarlyStoppingTrainer:
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
+        if utils.is_distributed():
+            assert isinstance(self.optimizer, torch.distributed.optim.ZeroRedundancyOptimizer)
+            self.optimizer.consolidate_state_dict(to=0)
         if utils.is_primary_worker():
             if has_improved:
                 self._update_best_params()

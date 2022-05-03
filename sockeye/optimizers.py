@@ -13,13 +13,15 @@
 
 from dataclasses import dataclass
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Type
 
 import torch
+import torch.distributed.optim
 
 from . import config
 from . import constants as C
 from .lr_scheduler import LearningRateScheduler
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +59,13 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
     :return: Tuple of an Optimizer and the kwargs dict for calling that
              optimizer's `zero_grad()` method.
     """
+
+    # Detect fastest supported optimizer implementations
     adam_impl = torch.optim.Adam
     sgd_impl = torch.optim.SGD
     # Built-in optimizers take the "set_to_none" argument. See:
     # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
     zero_grad_kwargs = {'set_to_none': True}
-
     if config.running_on_gpu:
         try:
             from apex.optimizers import FusedAdam, FusedSGD
@@ -77,10 +80,21 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
             logger.warning('Cannot import NVIDIA Apex optimizers (FusedAdam, FusedSGD). Consider installing Apex for '
                            'faster GPU training: https://github.com/NVIDIA/apex')
 
+    # Select optimizer class and populate settings
     if config.name == C.OPTIMIZER_ADAM:
-        return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                         weight_decay=config.weight_decay), zero_grad_kwargs
+        optim_cls = adam_impl  # type: Type[torch.optim.Optimizer]
+        optim_kwargs = {'lr': config.lr, 'betas': config.betas, 'eps': config.eps, 'weight_decay': config.weight_decay}
     elif config.name == C.OPTIMIZER_SGD:
-        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum,
-                        weight_decay=config.weight_decay), zero_grad_kwargs
-    raise ValueError(f'Unknown optimizer: {config.name}')
+        optim_cls = sgd_impl
+        optim_kwargs = {'lr': config.lr, 'momentum': config.momentum, 'weight_decay': config.weight_decay}
+    else:
+        raise ValueError(f'Unknown optimizer: {config.name}')
+
+    # Create optimizer
+    if utils.is_distributed():
+        optim = torch.distributed.optim.ZeroRedundancyOptimizer(
+            model.parameters(), optimizer_class=optim_cls, **optim_kwargs)  # type: ignore
+    else:
+        optim = optim_cls(model.parameters(), **optim_kwargs)  # type: ignore
+
+    return optim, zero_grad_kwargs
