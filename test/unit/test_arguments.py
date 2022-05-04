@@ -87,10 +87,12 @@ def test_logging_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(device_id=0,
+              multi_device=False,
               use_cpu=False,
               env=None)),
-    ('--device-id 1 --use-cpu ',
+    ('--device-id 1 --multi-device --use-cpu ',
      dict(device_id=1,
+          multi_device=True,
           use_cpu=True,
           env=None))
 ])

@@ -131,6 +131,14 @@ def check_arg_compatibility(args: argparse.Namespace):
         logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
                        'mixed precision training.')
 
+    if args.multi_device:
+        check_condition(C.WEIGHT_TYING_SRC_TRG not in args.weight_tying_type,
+                        'Multi device mode is not compatible with source-target weight tying. '
+                        'Use `--weight-tying-type trg_softmax` or `none`.')
+        check_condition(args.decode_and_evaluate == 0,
+                        'Multi device mode is not compatible with checkpoint decoding. '
+                        'Turn off with `--decode-and-evaluate 0`.')
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -904,12 +912,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     device = torch.device('cpu') if args.use_cpu \
-        else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
+        else torch.device('cuda', utils.get_local_rank() * (2 if args.multi_device else 1)) if utils.is_distributed() \
         else torch.device('cuda', args.device_id)
     if not args.use_cpu:
         # Ensure that GPU operations use the correct device by default
         torch.cuda.set_device(device)
-    logger.info(f'Training Device: {device}')
+    second_device = None  # type: Optional[torch.device]
+    if args.multi_device:
+        second_device = utils.next_device(device)
+        logger.info(f'Training Devices: {device} {second_device}')
+    else:
+        logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 
     train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
@@ -977,8 +990,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     sockeye_model = model.SockeyeModel(
         model_config,
+        multi_device=args.multi_device,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-    sockeye_model.to(device)
+    sockeye_model.to_device(device=device, second_device=second_device)
     sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
@@ -1014,7 +1028,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
     logger.info('Tracing model on validation batch')
-    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+    batch = eval_iter.next().load(device=device, second_device=second_device)  # pylint: disable=not-callable
     # When using AMP, turn on autocasting when tracing the model so that
     # dtypes will match during AMP training. Disable the weight cache for
     # compatibility with tracing. See:
@@ -1028,9 +1042,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # In distributed mode, wrap the traced model with a distributed
         # data-parallel model that shares (averages) gradients with models
         # in other worker processes.
-        training_model = torch.nn.parallel.DistributedDataParallel(training_model,
-                                                                   device_ids=None if args.use_cpu else [device],
-                                                                   output_device=None if args.use_cpu else device)
+        training_model = torch.nn.parallel.DistributedDataParallel(
+            training_model,
+            device_ids=None if args.use_cpu or args.multi_device else [device],
+            output_device=None if args.use_cpu or args.multi_device else device)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1043,6 +1058,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
+        second_device=second_device,
         using_amp=args.amp,
         using_apex_amp=args.apex_amp,
         custom_metrics_logger=custom_metrics_logger,

@@ -527,6 +527,11 @@ def add_device_args(params):
                                default=0,
                                help='GPU to use. 0 translates to "cuda:0", etc. When running in distributed mode '
                                     '(--dist), each process\'s device is set automatically. Default: %(default)s.')
+    device_params.add_argument('--multi-device',
+                               action='store_true',
+                               default=False,
+                               help='Run the model on multiple devices. The encoder runs on device_id and the decoder '
+                                    'runs on device_id + 1. Default: %(default)s.')
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')

@@ -154,6 +154,7 @@ class EarlyStoppingTrainer:
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
                  device: torch.device,
+                 second_device: Optional[torch.device] = None,
                  using_amp: bool = False,
                  using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -166,6 +167,7 @@ class EarlyStoppingTrainer:
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
+        self.second_device = second_device
         self.using_amp = using_amp
         if using_amp:
             self._scaler = torch.cuda.amp.GradScaler()
@@ -314,7 +316,7 @@ class EarlyStoppingTrainer:
                                 weights.
         :return: List loss values.
         """
-        batch = batch.load(device=self.device)
+        batch = batch.load(device=self.device, second_device=self.second_device)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
             outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
@@ -399,7 +401,7 @@ class EarlyStoppingTrainer:
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            batch = batch.load(device=self.device)
+            batch = batch.load(device=self.device, second_device=self.second_device)
             with torch.inference_mode():
                 # Forward: use sockeye_model because (traced) training_model
                 # doesn't support eval mode (still runs dropout, etc.)
@@ -574,6 +576,8 @@ class EarlyStoppingTrainer:
                 "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
                 "converged": self.state.converged,
                 "diverged": self.state.diverged}
+        if self.second_device is not None and self.second_device.type != 'cpu':
+            data['max-gpu2-memory'] = torch.cuda.max_memory_allocated(self.second_device)
 
         for metric in train_metrics:
             data["%s-train" % metric.name] = metric.get()

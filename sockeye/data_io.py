@@ -1909,12 +1909,14 @@ class Batch:
     samples: int
     tokens: int
 
-    def load(self, device: torch.device) -> 'Batch':
+    def load(self, device: torch.device, second_device: Optional[torch.device] = None) -> 'Batch':
+        if second_device is None:
+            second_device = device
         source = self.source.to(device)
         source_length = self.source_length.to(device)
-        target = self.target.to(device)
-        target_length = self.target_length.to(device)
-        labels = {name: label.to(device) for name, label in self.labels.items()}
+        target = self.target.to(second_device)
+        target_length = self.target_length.to(second_device)
+        labels = {name: label.to(second_device) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
 

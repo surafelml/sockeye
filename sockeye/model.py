@@ -88,11 +88,13 @@ class SockeyeModel(pt.nn.Module):
 
     def __init__(self,
                  config: ModelConfig,
+                 multi_device: bool = False,
                  inference_only: bool = False,
                  train_decoder_only: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.multi_device = multi_device
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -158,6 +160,21 @@ class SockeyeModel(pt.nn.Module):
         else:
             self.dtype = pt.float32
 
+    def to_device(self, device: pt.device, second_device: Optional[pt.device] = None):
+        if self.multi_device:
+            utils.check_condition(second_device is not None,
+                                  'Multi-device model requires both `device` and `second_device`')
+        else:
+            utils.check_condition(second_device is None, 'Single-device model only uses `device`')
+        self.to(device)
+        if self.multi_device:
+            self.embedding_target.to(second_device)
+            self.decoder.to(second_device)
+            assert isinstance(self.output_layer, pt.nn.Module)
+            self.output_layer.to(second_device)
+            self.factor_output_layers.to(second_device)
+        pt.cuda.empty_cache()
+
     def state_structure(self):
         return self.decoder.state_structure()
 
@@ -218,6 +235,8 @@ class SockeyeModel(pt.nn.Module):
         target_embed = self.embedding_target(target)
         source_encoded, source_encoded_length = self.encoder(source_embed, source_length)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
+        if self.multi_device:
+            states = [state.to(device=self.embedding_target.embedding.weight.device) for state in states]
         return source_encoded, source_encoded_length, target_embed, states
 
     def decode_step(self,
@@ -582,6 +601,7 @@ def initialize_parameters(module: pt.nn.Module):
 
 def load_model(model_folder: str,
                device: pt.device,
+               second_device: Optional[pt.device] = None,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                inference_only: bool = False,
@@ -623,15 +643,15 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                         forward_pass_cache_size=forward_pass_cache_size)
+    model = SockeyeModel(model_config, multi_device=second_device is not None, inference_only=inference_only,
+                         train_decoder_only=train_decoder_only, forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
                           allow_missing=allow_missing,
                           ignore_extra=False)
 
-    model.to(device)
+    model.to_device(device=device, second_device=second_device)
 
     if set_grad_req_null:
         model.eval()
@@ -656,6 +676,7 @@ def load_model(model_folder: str,
 def load_models(device: pt.device,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
+                second_device: Optional[pt.device] = None,
                 dtype: Optional[str] = C.DTYPE_FP32,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
@@ -692,6 +713,7 @@ def load_models(device: pt.device,
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model, src_vcbs, trg_vcbs = load_model(model_folder,
                                                device=device,
+                                               second_device=second_device,
                                                dtype=dtype,
                                                checkpoint=checkpoint,
                                                inference_only=inference_only,

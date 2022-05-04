@@ -581,6 +581,19 @@ def create_pool(max_processes):
         return multiprocessing.pool.Pool(processes=max_processes)
 
 
+def next_device(device: pt.device) -> pt.device:
+    if device.type == 'cuda':
+        if pt.cuda.device_count() > 1:
+            return pt.device('cuda', device.index + 1)
+        logger.warning('Called `next_device()` on a single-GPU host. Using CPU as next device for testing.')
+        return pt.device('cpu')
+    if device.type == 'cpu':
+        logger.warning('Called `next_device()` when running in CPU mode. Using CPU as next device for testing.')
+        return pt.device('cpu')
+    logger.warning('Called `next_device()` with an unknown device type. Returning device as next device.')
+    return device
+
+
 def is_distributed() -> bool:
     return torch.distributed.is_initialized()
 
