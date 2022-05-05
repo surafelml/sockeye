@@ -31,6 +31,7 @@ class OptimizerConfig(config.Config):
     # Optimizer
     name: str
     running_on_gpu: bool = False
+    use_zero: bool = False
 
     # Adam default values
     lr: float = 0.001
@@ -60,7 +61,7 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
              optimizer's `zero_grad()` method.
     """
 
-    # Detect fastest supported optimizer implementations
+    # Detect fastest available optimizer implementations
     adam_impl = torch.optim.Adam
     sgd_impl = torch.optim.SGD
     # Built-in optimizers take the "set_to_none" argument. See:
@@ -91,7 +92,7 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
         raise ValueError(f'Unknown optimizer: {config.name}')
 
     # Create optimizer
-    if utils.is_distributed():
+    if config.use_zero:
         optim = torch.distributed.optim.ZeroRedundancyOptimizer(
             model.parameters(), optimizer_class=optim_cls, **optim_kwargs)  # type: ignore
     else:
