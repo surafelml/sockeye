@@ -879,7 +879,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     """
 
     if args.dist:
-        torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu
+        torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu or args.multi_device
                                              else torch.distributed.Backend.NCCL)
 
     if args.dry_run:
@@ -1041,16 +1041,19 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
-    logger.info('Tracing model on a validation batch')
-    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
-    # When using AMP, turn on autocasting when tracing the model so that
-    # dtypes will match during AMP training. Disable the weight cache for
-    # compatibility with tracing. See:
-    # https://github.com/pytorch/pytorch/pull/63552
-    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
-        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                          batch.target, batch.target_length), strict=False)
-    eval_iter.reset()
+    if args.multi_device:
+        logger.info('Skipping trace for multi-device model')
+    else:
+        logger.info('Tracing model on a validation batch')
+        batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+        # When using AMP, turn on autocasting when tracing the model so that
+        # dtypes will match during AMP training. Disable the weight cache for
+        # compatibility with tracing. See:
+        # https://github.com/pytorch/pytorch/pull/63552
+        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
+            training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
+                                                            batch.target, batch.target_length), strict=False)
+        eval_iter.reset()
 
     if utils.is_distributed():
         # In distributed mode, wrap the traced model with a distributed
