@@ -773,6 +773,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
 
     config = optimizers.OptimizerConfig(name=args.optimizer,
                                         running_on_gpu=not args.use_cpu,
+                                        use_zero=args.optimizer_zero,
                                         lr=args.initial_learning_rate,
                                         betas=args.optimizer_betas,
                                         eps=args.optimizer_eps,

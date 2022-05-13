@@ -950,6 +950,12 @@ def add_training_args(params):
                               type=float_greater_or_equal(0),
                               default=1e-08,
                               help='Optimizer epsilon. Default: %(default)s.')
+    train_params.add_argument('--optimizer-zero',
+                              action='store_true',
+                              default=False,
+                              help='Use the Zero Redundancy Optimizer (ZeRO) technique to reduce memory usage by '
+                                   'sharding optimizer states across workers (Rajbhandari et al. 2020, '
+                                   'arxiv.org/abs/1910.02054). Default: %(default)s.')
 
     train_params.add_argument('--dist',
                               action='store_true',
