@@ -190,12 +190,15 @@ def bool_str() -> Callable:
     return parse
 
 
-def simple_dict() -> Callable:
+def simple_dict(key_data_type: Callable = str, value_data_type: Optional[Callable] = None) -> Callable:
     """
     A simple dictionary format that does not require spaces or quoting.
 
-    Supported types: bool, int, float
+    Supported types: str, bool, float, int
 
+    :param key_data_type: Parse keys as this data type. Default: str.
+    :param value_data_type: Parse values as this data type. None attempts bool,
+                            float, and int in that order. Default: None.
     :return: A method that can be used as a type in argparse.
     """
 
@@ -214,7 +217,7 @@ def simple_dict() -> Callable:
         try:
             for entry in dict_str.split(","):
                 key, value = entry.split(":")
-                _dict[key] = _parse(value)
+                _dict[key_data_type(key)] = value_data_type(value) if value_data_type is not None else _parse(value)
         except ValueError:
             raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
                                              " Supported types: bool, int, float.")
@@ -530,16 +533,34 @@ def add_device_args(params):
     device_params.add_argument('--device-id',
                                type=int_greater_or_equal(0),
                                default=0,
-                               help='GPU to use. 0 translates to "cuda:0", etc. When running in distributed mode '
-                                    '(--dist), each process\'s device is set automatically. Default: %(default)s.')
-    device_params.add_argument('--multi-device',
-                               action='store_true',
-                               default=False,
-                               help='Run the model on multiple devices. The encoder runs on device_id and the decoder '
-                                    'runs on device_id + 1. Default: %(default)s.')
+                               help='GPU to use unless others are specified by --encoder-device-ids and '
+                                    '--decoder-device-ids. 0 indicates cuda:0, etc. In distributed mode (--dist), each '
+                                    'process\'s device ID is incremented by local_rank * total_devices_per_process. '
+                                    'Default: %(default)s.')
+    device_params.add_argument('--encoder-device-ids',
+                               type=simple_dict(key_data_type=int, value_data_type=int),
+                               default=None,
+                               help='GPUs to use for the encoder (overrides --device-id). Specify the first layer that '
+                                    'uses each device ID. For example, 0:0,12:1 indicates that layers 0-11 run on '
+                                    'cuda:0 and layers 12+ run on cuda:1. A device ID must be specified for the first '
+                                    'layer (0). Everything before encoder layer 0 (e.g., source embeddings) runs on '
+                                    'the same device as layer 0. In distributed mode (--dist), all device IDs are '
+                                    'incremented by local_rank * total_devices_per_process. Defaults to 0:device_id '
+                                    '(specified by --device-id).')
+    device_params.add_argument('--decoder-device-ids',
+                               type=simple_dict(key_data_type=int, value_data_type=int),
+                               default=None,
+                               help='GPUs to use for the decoder (overrides --device-id). Specify the first layer that '
+                                    'uses each device ID. For example, 0:2,12:3 indicates that layers 0-11 run on '
+                                    'cuda:2 and layers 12+ run on cuda:3. A device ID must be specified for the first '
+                                    'layer (0). Target embeddings run on the same device as decoder layer 0. Everything '
+                                    'after the last decoder layer (e.g., output layers) runs on the same device as the '
+                                    'last layer. In distributed mode (--dist), all device IDs are incremented by '
+                                    'local_rank * total_devices_per_process. Defaults to 0:device_id (specified by '
+                                    '--device-id).')
     device_params.add_argument('--use-cpu',
                                action='store_true',
-                               help='Use CPU device instead of GPU.')
+                               help='Use CPU device instead of GPU device(s).')
     device_params.add_argument('--env',
                                help='List of environment variables to be set before importing PyTorch. Separated by '
                                     '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')

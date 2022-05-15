@@ -94,13 +94,11 @@ class SockeyeModel(pt.nn.Module):
 
     def __init__(self,
                  config: ModelConfig,
-                 multi_device: bool = False,
                  inference_only: bool = False,
                  train_decoder_only: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
-        self.multi_device = multi_device
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -155,6 +153,12 @@ class SockeyeModel(pt.nn.Module):
         self.dtype = pt.float32
         self.cast(config.dtype)
 
+        # Devices for different model components (multi-device models only)
+        self.encoder_input_device = None  # type: Optional[pt.device]
+        self.encoder_output_device = None  # type: Optional[pt.device]
+        self.decoder_input_device = None  # type: Optional[pt.device]
+        self.decoder_output_device = None  # type: Optional[pt.device]
+
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
@@ -173,20 +177,44 @@ class SockeyeModel(pt.nn.Module):
         else:
             self.dtype = pt.float32
 
-    def to_device(self, device: pt.device, second_device: Optional[pt.device] = None):
-        if self.multi_device:
-            utils.check_condition(second_device is not None,
-                                  'Multi-device model requires both `device` and `second_device`')
-        else:
-            utils.check_condition(second_device is None, 'Single-device model only uses `device`')
-        self.to(device)
-        if self.multi_device:
-            self.embedding_target.to(second_device)
-            self.decoder.to(second_device)
-            assert isinstance(self.output_layer, pt.nn.Module)
-            self.output_layer.to(second_device)
-            self.factor_output_layers.to(second_device)
-        pt.cuda.empty_cache()
+    def to_devices(self, encoder_devices: Dict[int, pt.device], decoder_devices: Dict[int, pt.device]):
+        """
+        Set the devices of this model's submodules according to the specified
+        dictionaries. To set a single device for the entire model, use `to()`
+        instead.
+
+        For both encoder and decoder, each dictionary entry indicates the first
+        layer that uses a device (int -> device). Following layers use the same
+        device until another entry applies. Other cases:
+        - Everything before the first encoder layer uses the same device as that
+          layer: source embeddings.
+        - Everything after the last decoder layer uses the same device as that
+          layer: output layers, length ratio.
+        - Target embeddings use the same device as the first decoder layer.
+        - NVS uses the same device as the last encoder layer.
+
+        :param encoder_devices: A dictionary that maps integer encoder layer IDs
+                                to devices.
+        :param decoder_devices: A dictionary that maps integer decoder layer IDs
+                                to devices.
+        """
+        assert 0 in encoder_devices and 0 in decoder_devices, \
+            f'Dictionaries must specify a device for layer 0: {encoder_devices}, {decoder_devices}'
+        self.encoder_input_device = encoder_devices[0]
+        self.encoder_output_device = encoder_devices[sorted(encoder_devices)[-1]]
+        self.decoder_input_device = decoder_devices[0]
+        self.decoder_output_device = decoder_devices[sorted(decoder_devices)[-1]]
+        self.embedding_source.to(self.encoder_input_device)
+        self.embedding_target.to(self.decoder_input_device)
+        self.encoder.to_devices(encoder_devices)
+        self.decoder.to_devices(decoder_devices)
+        if self.nvs is not None:
+            self.nvs.to(self.encoder_output_device)
+        assert isinstance(self.output_layer, pt.nn.Module)
+        self.output_layer.to(self.decoder_output_device)
+        self.factor_output_layers.to(self.decoder_output_device)
+        if self.length_ratio is not None:
+            self.length_ratio.to(self.decoder_output_device)
 
     def state_structure(self):
         return self.decoder.state_structure()
@@ -261,8 +289,8 @@ class SockeyeModel(pt.nn.Module):
             if self.config.neural_vocab_selection_block_loss:
                 source_encoded_for_nvs = source_encoded.detach()
             nvs = self.nvs(source_encoded_for_nvs, source_length, att_mask)
-        if self.multi_device:
-            states = [state.to(device=self.embedding_target.embedding.weight.device) for state in states]
+        if self.decoder_input_device is not None and states[0].device != self.decoder_input_device:
+            states = [state.to(self.decoder_input_device) for state in states]
         return source_encoded, source_encoded_length, target_embed, states, nvs
 
     def decode_step(self,
@@ -385,7 +413,7 @@ class SockeyeModel(pt.nn.Module):
 
     def load_parameters(self,
                         filename: str,
-                        device: Optional[pt.device] = None,
+                        device: pt.device = pt.device('cpu'),
                         allow_missing: bool = False,
                         ignore_extra: bool = False):
         """
@@ -393,7 +421,7 @@ class SockeyeModel(pt.nn.Module):
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
 
         :param filename: Path to parameter file
-        :param device: Torch device to load parameters to
+        :param device: Torch device to load parameters to. Default: cpu.
         :param allow_missing: Whether to silently skip loading parameters not represents in the file. Default: False.
         :param ignore_extra: Whether to silently ignore parameters from the file that are not part of this Module.
                              Default: False.
@@ -631,7 +659,6 @@ def initialize_parameters(module: pt.nn.Module):
 
 def load_model(model_folder: str,
                device: pt.device,
-               second_device: Optional[pt.device] = None,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                inference_only: bool = False,
@@ -673,15 +700,15 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config, multi_device=second_device is not None, inference_only=inference_only,
-                         train_decoder_only=train_decoder_only, forward_pass_cache_size=forward_pass_cache_size)
+    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
+                         forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
                           allow_missing=allow_missing,
                           ignore_extra=False)
 
-    model.to_device(device=device, second_device=second_device)
+    model.to(device)
 
     if set_grad_req_null:
         model.eval()
@@ -706,7 +733,6 @@ def load_model(model_folder: str,
 def load_models(device: pt.device,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
-                second_device: Optional[pt.device] = None,
                 dtype: Optional[str] = C.DTYPE_FP32,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
@@ -743,7 +769,6 @@ def load_models(device: pt.device,
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model, src_vcbs, trg_vcbs = load_model(model_folder,
                                                device=device,
-                                               second_device=second_device,
                                                dtype=dtype,
                                                checkpoint=checkpoint,
                                                inference_only=inference_only,

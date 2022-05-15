@@ -79,12 +79,17 @@ class TransformerEncoderBlock(pt.nn.Module):
         if config.use_lhuc:
             self.lhuc = sockeye.layers.LHUC(config.model_size)
 
+        self.device = None  # type: Optional[pt.device]
+
     def forward(self, data: pt.Tensor, att_mask: pt.Tensor = None) -> pt.Tensor:
         """
         :param data: Input tensor of shape (length, batch_size, hidden)
         :param att_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
                          to mask self-attention scores. True for padding positions.
         """
+        if self.device is not None and data.device != self.device:
+            data = data.to(self.device)
+
         # self-attention
         data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data),
                                                previous_states=None,
@@ -162,6 +167,8 @@ class TransformerDecoderBlock(pt.nn.Module):
         if config.use_lhuc:
             self.lhuc = sockeye.layers.LHUC(config.model_size)
 
+        self.device = None  # type: Optional[pt.device]
+
     @property
     def num_state_tensors(self) -> int:
         """ Number of state tensors returned by the layer """
@@ -186,6 +193,9 @@ class TransformerDecoderBlock(pt.nn.Module):
                 source_mask: Optional[pt.Tensor],
                 autoregr_states: Optional[pt.Tensor],
                 enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+        if self.device is not None and target.device != self.device:
+            data = target.to(self.device)
+
         target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target),
                                                                     previous_states=autoregr_states,
                                                                     mask=target_mask)

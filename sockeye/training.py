@@ -154,8 +154,9 @@ class EarlyStoppingTrainer:
                  optimizer: torch.optim.Optimizer,
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
-                 device: torch.device,
-                 second_device: Optional[torch.device] = None,
+                 encoder_device: torch.device,
+                 decoder_device: Optional[torch.device] = None,
+                 output_device: Optional[torch.device] = None,
                  using_amp: bool = False,
                  using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -167,8 +168,9 @@ class EarlyStoppingTrainer:
         self.optimizer = optimizer
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
-        self.device = device
-        self.second_device = second_device
+        self.encoder_device = encoder_device
+        self.decoder_device = decoder_device if decoder_device is not None else encoder_device
+        self.output_device = output_device if output_device is not None else decoder_device
         self.using_amp = using_amp
         if using_amp:
             self._scaler = torch.cuda.amp.GradScaler()
@@ -322,7 +324,9 @@ class EarlyStoppingTrainer:
                                 weights.
         :return: List loss values.
         """
-        batch = batch.load(device=self.device, second_device=self.second_device)
+        batch = batch.load(encoder_device=self.encoder_device,
+                           decoder_device=self.decoder_device,
+                           output_device=self.output_device)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
             outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
@@ -407,7 +411,9 @@ class EarlyStoppingTrainer:
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            batch = batch.load(device=self.device, second_device=self.second_device)
+            batch = batch.load(encoder_device=self.encoder_device,
+                               decoder_device=self.decoder_device,
+                               output_device=self.output_device)
             with torch.inference_mode():
                 # Forward: use sockeye_model because (traced) training_model
                 # doesn't support eval mode (still runs dropout, etc.)
@@ -562,7 +568,7 @@ class EarlyStoppingTrainer:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
                 if os.path.exists(self.best_params_fname):
-                    self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
+                    self.sockeye_model.load_parameters(filename=self.best_params_fname)
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
             lr = scheduler.lr
@@ -579,11 +585,10 @@ class EarlyStoppingTrainer:
                 "learning-rate": (self.optimizer_config.lr if self.optimizer_config.lr_scheduler is None
                                   else self.optimizer_config.lr_scheduler.lr),
                 "time-elapsed": self.state.time_elapsed,
-                "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
+                "max-gpu-memory": torch.cuda.max_memory_allocated(self.encoder_device),
                 "converged": self.state.converged,
                 "diverged": self.state.diverged}
-        if self.second_device is not None and self.second_device.type != 'cpu':
-            data['max-gpu2-memory'] = torch.cuda.max_memory_allocated(self.second_device)
+        # TODO(mdenkows): Report memory usage for additional GPUs
 
         for metric in train_metrics:
             data["%s-train" % metric.name] = metric.get()
@@ -623,7 +628,7 @@ class EarlyStoppingTrainer:
         logger.info('Saved optimizer state to "%s"', fname)
 
     def _load_optimizer_state(self, fname):
-        self.optimizer.load_state_dict(torch.load(fname, map_location=self.device))
+        self.optimizer.load_state_dict(torch.load(fname))
         logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
@@ -705,7 +710,7 @@ class EarlyStoppingTrainer:
         """
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.sockeye_model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
+        self.sockeye_model.load_parameters(params_fname, allow_missing=False, ignore_extra=False)
 
         # (2) Optimizer states
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)

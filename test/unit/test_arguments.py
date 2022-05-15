@@ -87,12 +87,14 @@ def test_logging_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(device_id=0,
-              multi_device=False,
+              encoder_device_ids=None,
+              decoder_device_ids=None,
               use_cpu=False,
               env=None)),
-    ('--device-id 1 --multi-device --use-cpu ',
+    ('--device-id 1 --encoder-device-ids 0:0,12:1 --decoder-device-ids 0:2,12:3 --use-cpu ',
      dict(device_id=1,
-          multi_device=True,
+          encoder_device_ids={0: 0, 12: 1},
+          decoder_device_ids={0: 2, 12: 3},
           use_cpu=True,
           env=None))
 ])

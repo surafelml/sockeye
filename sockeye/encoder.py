@@ -13,7 +13,7 @@
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional, Union
 
 import torch as pt
 
@@ -209,3 +209,23 @@ class TransformerEncoder(Encoder):
         Return the representation size of this encoder.
         """
         return self.config.model_size
+
+    def to_devices(self, devices: Dict[int, pt.device]):
+        """
+        Set the devices of this encoder's submodules according to the specified
+        dictionary. Each dictionary entry indicates the first layer that uses a
+        device (int -> device). Following layers use the same device until
+        another entry applies. To set a single device for the entire model, use
+        `to()` instead.
+        """
+        assert 0 in devices, f'Dictionary must specify a device for layer 0: {devices}'
+        device = devices[0]
+        if isinstance(self.dropout, pt.nn.Dropout):
+            self.dropout.to(device)
+        self.pos_embedding.to(device)
+        for i, layer in enumerate(self.layers):
+            if i in devices:
+                device = devices[i]
+            layer.to(device)
+            layer.device = device
+        self.final_process.to(device)

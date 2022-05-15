@@ -1909,14 +1909,19 @@ class Batch:
     samples: int
     tokens: int
 
-    def load(self, device: torch.device, second_device: Optional[torch.device] = None) -> 'Batch':
-        if second_device is None:
-            second_device = device
-        source = self.source.to(device)
-        source_length = self.source_length.to(device)
-        target = self.target.to(second_device)
-        target_length = self.target_length.to(second_device)
-        labels = {name: label.to(second_device) for name, label in self.labels.items()}
+    def load(self,
+             encoder_device: torch.device,
+             decoder_device: Optional[torch.device] = None,
+             output_device: Optional[torch.device] = None) -> 'Batch':
+        if decoder_device is None:
+            decoder_device = encoder_device
+        if output_device is None:
+            output_device = decoder_device
+        source = self.source.to(encoder_device)
+        source_length = self.source_length.to(encoder_device)
+        target = self.target.to(decoder_device)
+        target_length = self.target_length.to(decoder_device)
+        labels = {name: label.to(output_device) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
 

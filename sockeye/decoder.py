@@ -109,6 +109,10 @@ class Decoder(pt.nn.Module):
     def get_num_hidden(self):
         raise NotImplementedError()
 
+    @abstractmethod
+    def to_devices(self, devices: Dict[int, pt.device]):
+        raise NotImplementedError()
+
 
 @Decoder.register(TransformerConfig)
 class TransformerDecoder(Decoder):
@@ -130,12 +134,16 @@ class TransformerDecoder(Decoder):
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
+
+        self.autoregressive_mask = transformer.AutoRegressiveMask()
+
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,
                                                          max_seq_len=self.config.max_seq_len_target,
                                                          scale_up_input=True,
                                                          scale_down_positions=False)
-        self.autoregressive_mask = transformer.AutoRegressiveMask()
+        if self.config.dropout_prepost > 0.0:
+            self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
             transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)
@@ -144,8 +152,6 @@ class TransformerDecoder(Decoder):
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size)
-        if self.config.dropout_prepost > 0.0:
-            self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 
     def state_structure(self) -> str:
         """
@@ -289,3 +295,24 @@ class TransformerDecoder(Decoder):
 
     def get_num_hidden(self):
         return self.config.model_size
+
+    def to_devices(self, devices: Dict[int, pt.device]):
+        """
+        Set the devices of this decoder's submodules according to the specified
+        dictionary. Each dictionary entry indicates the first layer that uses a
+        device (int -> device). Following layers use the same device until
+        another entry applies. To set a single device for the entire model, use
+        `to()` instead.
+        """
+        assert 0 in devices, f'Dictionary must specify a device for layer 0: {devices}'
+        device = devices[0]
+        self.autoregressive_mask.to(device)
+        self.pos_embedding.to(device)
+        if isinstance(self.dropout, pt.nn.Dropout):
+            self.dropout.to(device)
+        for i, layer in enumerate(self.layers):
+            if i in devices:
+                device = devices[i]
+            layer.to(device)
+            layer.device = device
+        self.final_process.to(device)

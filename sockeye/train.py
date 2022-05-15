@@ -131,13 +131,16 @@ def check_arg_compatibility(args: argparse.Namespace):
         logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
                        'mixed precision training.')
 
-    if args.multi_device:
+    if args.encoder_device_ids is not None:
+        check_condition(0 in args.encoder_device_ids,
+                        f'Option --encoder-device-ids must specify a device ID for layer 0: {args.encoder_device_ids}')
+    if args.decoder_device_ids is not None:
+        check_condition(0 in args.decoder_device_ids,
+                        f'Option --decoder-device-ids must specify a device ID for layer 0: {args.decoder_device_ids}')
+    if args.encoder_device_ids is not None or args.decoder_device_ids is not None:
         check_condition(C.WEIGHT_TYING_SRC_TRG not in args.weight_tying_type,
-                        'Multi device mode is not compatible with source-target weight tying. '
-                        'Use `--weight-tying-type trg_softmax` or `none`.')
-        check_condition(args.decode_and_evaluate == 0,
-                        'Multi device mode is not compatible with checkpoint decoding. '
-                        'Turn off with `--decode-and-evaluate 0`.')
+                        'Options --encoder-device-ids and --decoder-device-ids are not compatible with source-target '
+                        'weight tying. Use `--weight-tying-type trg_softmax` or `none`.')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -878,8 +881,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
+    # Populate device IDs first to determine how many devices each process will
+    # use. This is required to choose/initialize the distributed backend, which
+    # is a prerequisite for all inter-process communication.
+    encoder_device_ids = args.encoder_device_ids if args.encoder_device_ids is not None else {0: args.device_id}
+    decoder_device_ids = args.decoder_device_ids if args.decoder_device_ids is not None else {0: args.device_id}
+    total_devices = 1 if args.use_cpu else len(set(encoder_device_ids.values()) | set(decoder_device_ids.values()))
+
     if args.dist:
-        torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu or args.multi_device
+        torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu or total_devices > 1
                                              else torch.distributed.Backend.NCCL)
 
     if args.dry_run:
@@ -925,18 +935,25 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    device = torch.device('cpu') if args.use_cpu \
-        else torch.device('cuda', utils.get_local_rank() * (2 if args.multi_device else 1)) if utils.is_distributed() \
-        else torch.device('cuda', args.device_id)
-    if not args.use_cpu:
-        # Ensure that GPU operations use the correct device by default
-        torch.cuda.set_device(device)
-    second_device = None  # type: Optional[torch.device]
-    if args.multi_device:
-        second_device = utils.next_device(device)
-        logger.info(f'Training Devices: {device} {second_device}')
+    # Determine the training device(s) for this process
+    if args.use_cpu:
+        encoder_devices = {0: torch.device('cpu')}
+        decoder_devices = {0: torch.device('cpu')}
     else:
-        logger.info(f'Training Device: {device}')
+        if not torch.cuda.is_available():
+            raise RuntimeError('CUDA is not available. Specify `--use-cpu` to train on CPUs.')
+        # In distributed mode, increment all device IDs to match this process's
+        # local rank.
+        offset = utils.get_local_rank() * total_devices if utils.is_distributed() else 0
+        encoder_devices = {layer_id: torch.device('cuda', device_id + offset)
+                           for layer_id, device_id in encoder_device_ids.items()}
+        decoder_devices = {layer_id: torch.device('cuda', device_id + offset)
+                           for layer_id, device_id in decoder_device_ids.items()}
+        # Use the first encoder device as the default CUDA device
+        torch.cuda.set_device(encoder_devices[0])
+    training_devices = set(encoder_devices.values()) | set(decoder_devices.values())
+    logger.info(f'Training Device(s): {sorted([str(device) for device in training_devices])}')
+
     utils.seed_rngs(args.seed)
 
     train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
@@ -1004,15 +1021,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     sockeye_model = model.SockeyeModel(
         model_config,
-        multi_device=args.multi_device,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-    sockeye_model.to_device(device=device, second_device=second_device)
+    sockeye_model.to_devices(encoder_devices=encoder_devices, decoder_devices=decoder_devices)
     sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
     if args.params is not None:
         sockeye_model.load_parameters(filename=args.params,
-                                      device=device,
                                       allow_missing=args.allow_missing_params or model_config.lhuc,
                                       ignore_extra=args.ignore_extra_params)
 
@@ -1041,18 +1056,18 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
-    if args.multi_device:
+    if total_devices > 1:
         logger.info('Skipping trace for multi-device model')
     else:
         logger.info('Tracing model on a validation batch')
-        batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+        batch = eval_iter.next().load(encoder_device=encoder_devices[0])  # pylint: disable=not-callable
         # When using AMP, turn on autocasting when tracing the model so that
         # dtypes will match during AMP training. Disable the weight cache for
         # compatibility with tracing. See:
         # https://github.com/pytorch/pytorch/pull/63552
         with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
             training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                            batch.target, batch.target_length), strict=False)
+                                                              batch.target, batch.target_length), strict=False)
         eval_iter.reset()
 
     if utils.is_distributed():
@@ -1061,8 +1076,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # in other worker processes.
         training_model = torch.nn.parallel.DistributedDataParallel(
             training_model,
-            device_ids=None if args.use_cpu or args.multi_device else [device],
-            output_device=None if args.use_cpu or args.multi_device else device)
+            device_ids=None if args.use_cpu or total_devices > 1 else [encoder_devices[0]],
+            output_device=None if args.use_cpu or total_devices > 1 else encoder_devices[0])
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1074,8 +1089,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         optimizer=optimizer,
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
-        device=device,
-        second_device=second_device,
+        encoder_device=encoder_devices[0],
+        decoder_device=decoder_devices[0],
+        output_device=decoder_devices[sorted(decoder_devices)[-1]],
         using_amp=args.amp,
         using_apex_amp=args.apex_amp,
         custom_metrics_logger=custom_metrics_logger,
@@ -1084,7 +1100,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # Only primary worker runs checkpoint decoder
     checkpoint_decoder = None
     if utils.is_primary_worker():
-        checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
+        if total_devices > 1:
+            logger.info('Disabling checkpoint decoding due to incompatibility with multi-device models.')
+        else:
+            checkpoint_decoder = create_checkpoint_decoder(args, encoder_devices[0], sockeye_model,
+                                                           source_vocabs, target_vocabs)
 
     training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                  checkpoint_decoder=checkpoint_decoder)
