@@ -949,7 +949,7 @@ def add_training_args(params):
                               action='store_true',
                               default=False,
                               help='Use the Zero Redundancy Optimizer (ZeRO) technique to reduce memory usage by '
-                                   'sharding optimizer states across workers (Rajbhandari et al. 2020, '
+                                   'sharding optimizer states across processes (Rajbhandari et al. 2019, '
                                    'arxiv.org/abs/1910.02054). Default: %(default)s.')
 
     train_params.add_argument('--dist',

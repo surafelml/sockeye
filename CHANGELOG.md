@@ -11,9 +11,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.15]
+
+### Added
+
+- Added support for ZeroRedundancyOptimizer ([ZeRO, Rajbhandari et al., 2019](https://arxiv.org/abs/1910.02054)). When running distributed training (`torchrun ... sockeye-train --dist ...`), use argument `--optimizer-zero` to reduce memory usage by sharding optimizer states across processes.
+
 ## [3.1.14]
 
 ### Added
+
 - Added the implementation of Neural vocabulary selection to Sockeye as presented in our NAACL 2022 paper "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation" (Tobias Domhan, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber).
   - To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
 
