@@ -25,7 +25,7 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Any, cast, Callable, Optional, Dict, List, Tuple
+from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import torch
 import torch.distributed
@@ -1044,25 +1044,33 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # This starts as a ModelWithLoss instance. It is sequentially wrapped to
     # produce the model object used for forward passes and (in some
     # configurations) backward passes during training.
-    model_object = training.ModelWithLoss(model=sockeye_model, losses=losses)  # type: torch.nn.Module
+    model_object = training.ModelWithLoss(
+        model=sockeye_model,
+        losses=losses,
+        # Activate for models that produce float16 outputs
+        require_float32_loss=using_deepspeed or args.apex_amp)  # type: torch.nn.Module
 
     if using_deepspeed:
-        ds_config = {
-            'train_micro_batch_size_per_gpu': args.batch_size,
-            'gradient_accumulation_steps': args.update_interval,
-            'optimizer': {
-                'type': optimizer_class.__name__,
-                'params': optimizer_kwargs,
-            },
-            'steps_per_print': args.update_interval * args.checkpoint_interval,
-        }
-        if args.amp:
-            ds_config['fp16'] = {
-                'enabled': True,
-                'initial_scale_power': 18,
+        # If a DeepSpeed config file is specified, use it directly. Otherwise,
+        # create a config dictionary from training arguments.
+        ds_config = args.deepspeed_config
+        if ds_config is None:
+            ds_config = {
+                'train_micro_batch_size_per_gpu': args.batch_size,
+                'gradient_accumulation_steps': args.update_interval,
+                'optimizer': {
+                    'type': optimizer_class.__name__,
+                    'params': optimizer_kwargs,
+                },
+                'steps_per_print': args.update_interval * args.checkpoint_interval,
             }
-        if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
-            ds_config['gradient_clipping'] = optimizer_config.gradient_clipping_threshold
+            if args.amp:
+                ds_config['fp16'] = {
+                    'enabled': True,
+                    'initial_scale_power': 18,
+                }
+            if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
+                ds_config['gradient_clipping'] = optimizer_config.gradient_clipping_threshold
         # Wrap the model object with a DeepSpeed engine that automatically
         # handles many aspects of distributed training.
         model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,

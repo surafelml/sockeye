@@ -57,15 +57,20 @@ class ModelWithLoss(torch.nn.Module):
 
     :param model: SockeyeModel.
     :param losses: List of Loss objects.
+    :param require_float32_loss: Convert model outputs to float32 before
+                                 computing losses. This is useful for avoiding
+                                 overflow (inf) when computing loss on float16
+                                 model outputs.
 
     :return: Tuple of summed loss, list of loss values, and list of number of
              samples.
     """
-    def __init__(self, model: model.SockeyeModel, losses: List[loss.Loss]) -> None:
+    def __init__(self, model: model.SockeyeModel, losses: List[loss.Loss], require_float32_loss: bool = False) -> None:
         super().__init__()
         self.model = model
         self.traced_model = None  # type: Optional[torch.jit.ScriptModule]
         self.losses = losses
+        self.require_float32_loss = require_float32_loss
 
     def forward(self, source: torch.Tensor,
                 source_length: torch.Tensor,
@@ -79,9 +84,8 @@ class ModelWithLoss(torch.nn.Module):
             self.traced_model = torch.jit.trace(self.model, (source, source_length,
                                                              target, target_length), strict=False)
         model_outputs = self.model(source, source_length, target, target_length)
-        # Guarantee model outputs are in FP32 to avoid overflow (inf) when
-        # computing loss
-        model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
+        if self.require_float32_loss:
+            model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -364,7 +368,7 @@ class EarlyStoppingTrainer:
         # Backward
         if self.using_deepspeed:
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
-            self.model_object.backward(sum_losses)
+            self.model_object.backward(sum_losses)  # type: ignore
         else:
             if self.config.update_interval > 1:
                 # Scale loss by number of batches per update
@@ -404,7 +408,7 @@ class EarlyStoppingTrainer:
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
         if self.using_deepspeed:
-            self.model_object.step()
+            self.model_object.step()  # type: ignore
         elif is_update_batch:
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)

@@ -194,6 +194,7 @@ def test_inference_args(test_params, expected_params):
               optimizer_eps=1e-08,
               dist=False,
               local_rank=None,
+              deepspeed_config=None,
               min_samples=None,
               max_samples=None,
               min_updates=None,

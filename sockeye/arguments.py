@@ -958,6 +958,11 @@ def add_training_args(params):
                                help='The DeepSpeed launcher (`deepspeed`) automatically adds this argument. When it is '
                                     'present, training runs in DeepSpeed mode. This argument does not need to be '
                                     'specified manually.')
+    train_params.add_argument('--deepspeed-config',
+                              type=regular_file(),
+                              default=None,
+                              help='DeepSpeed JSON config file. See: https://www.deepspeed.ai/docs/config-json/. '
+                                   'Default: %(default)s.')
 
     train_params.add_argument('--initial-learning-rate',
                               type=float,
